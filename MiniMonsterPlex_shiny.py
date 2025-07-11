@@ -11,14 +11,47 @@ import re
 import subprocess 
 import multiprocessing
 from pathlib import Path
+import sys
 
-def auto_bowtie2(outPut_Folder, input_file, fileNum,threads):
+def auto_build_ref(outPut_Folder,ref):
+	ref_file_path = Path(ref)
+	ref_name = ref_file_path.name.split('.')[0]
+	try:
+		os.mkdir(os.path.join(outPut_Folder,ref_name))
+		command = [
+			'bowtie2-build',
+			os.path.join(outPut_Folder,'index',ref),
+			os.path.join(outPut_Folder,'index',f'{ref_name}_index')
+		]
+
+		subprocess.run(' '.join(command),
+					shell=True,
+					check=True,
+					capture_output=True,
+					text=True)
+		
+		return os.path.join(outPut_Folder,'index',f'{ref_name}_index')
+	except subprocess.CalledProcessError as e:
+		# Clean up failed files
+		files_to_remove = glob.glob(os.path.join(outPut_Folder,'index','*.bt2'))
+		for file in files_to_remove:
+			os.remove(file)
+		# Raise an exception with detailed error info instead of quitting
+		error_details = (f"Something went wrong with building refernce for file: {ref_name}.\n"
+						 f"Command: {e}\n"
+						 f"Return Code: {e.returncode}\n"
+						 f"Stderr: {e.stderr}")
+		raise RuntimeError(error_details)
+		
+
+def auto_bowtie2(outPut_Folder, input_file, fileNum,threads,index):
 	try:
 		print(fileNum, " is entering the pipeline")
 		# bowtie2 + samtools sort call
 		command = ['bowtie2', '--no-unal',
 			'-p', str(threads),
-			'-x', 'index/70-15_small_index',
+			#'-x', 'index/70-15_small_index',
+			'-x', index,
 			'-U', input_file,
 			'--local', '--very-sensitive-local',
 			'2>', f'{outPut_Folder}/bowtie_out/{fileNum}_alignment_summary.txt',
@@ -78,7 +111,7 @@ def parse_alignment_summary(fileNum, outPut_Folder):
 	return f"{Path(fileNum).stem.replace('_alignment_summary','')},{total_reads},{aligned_total},{aligned_fraction:.4f}"
 
 
-def auto_mpileup(outPut, fileNum, threads):
+def auto_mpileup(outPut, project_name,fileNum, threads,reference):
 	try:
 		command = ['bcftools',
 				'mpileup',
@@ -91,7 +124,8 @@ def auto_mpileup(outPut, fileNum, threads):
 				'--annotate',
 				'FORMAT/AD',
 				'-f',
-				'index/70-15_small.fasta',
+				#'index/70-15_small.fasta',
+				os.path.join('Projects',project_name,'index',reference),
 				os.path.join(outPut,'bowtie_out',f'{fileNum}hits.bam'),
 				'>>',
 				f'{outPut}/mpileup_out/{fileNum}.vcf']
@@ -256,13 +290,17 @@ def autoMerge(outPut,project_name):
 						 f"Stderr: {e.stderr}")
 		raise RuntimeError(error_details)
 		
-def sampleBuilder(outPut,metadata_file,project_name):
-	sites =[]
-	sitesUsed =[]
+def sampleBuilder(outPut,metadata_file,project_name,sites_list):
 	#reads a list of sites you want and only looks at data from there
-	with open('MonsterPlexSitesList_small_index.txt', 'r') as read:
-		for line in read:
-			sites.append(line.strip('\n'))
+	if sites_list != None:
+		sites =[]
+		full = False
+		with open(os.path.join(project_name,sites_list), 'r') as read:
+			for line in read:
+				sites.append(line.strip('\n'))
+	else:
+		sites =[]
+		full = True
 
 	with open(f'{outPut}/merge_out/{project_name}MergedCallAll.vcf', 'r') as read:
 		seqs = list()
@@ -275,7 +313,7 @@ def sampleBuilder(outPut,metadata_file,project_name):
 					seqs.append([fqList[n], ''])
 					check = True
 			#elif check:
-			elif check and line.strip('\n').split('\t')[0] + ' ' + line.strip('\n').split('\t')[1] in sites:
+			elif (check and line.strip('\n').split('\t')[0] + ' ' + line.strip('\n').split('\t')[1] in sites) or (check and full):
 				#this creates a horizontal split of the line
 				lineList = line.strip('\n').split('\t')
 				for n in range(9,len(lineList)):
@@ -286,18 +324,14 @@ def sampleBuilder(outPut,metadata_file,project_name):
 						if fields[0] == '0':
 							if int(fields[2]) > 5:
 								seqs[n - 9][1] += lineList[3]
-								sitesUsed.append(line.strip('\n').split('\t')[0] + ' ' + line.strip('\n').split('\t')[1])
 							else:
 								seqs[n - 9][1] += "N"
-								sitesUsed.append(line.strip('\n').split('\t')[0] + ' ' + line.strip('\n').split('\t')[1])
 							#this checks alt
 						elif fields[0] == '1':
 							if int(fields[2]) > 5:
 								seqs[n - 9][1] += lineList[4]
-								sitesUsed.append(line.strip('\n').split('\t')[0] + ' ' + line.strip('\n').split('\t')[1])
 							else:
 								seqs[n - 9][1] += "N"
-								sitesUsed.append(line.strip('\n').split('\t')[0] + ' ' + line.strip('\n').split('\t')[1])
 						else:
 							raise RuntimeError(f"Something went wrong with {seqs[n][0]}\n{lineList[n]} at site {line.strip().split()[0]} {line.strip().split()[1]}")
 					#this checks cases were both ref and alt are registered
@@ -308,37 +342,28 @@ def sampleBuilder(outPut,metadata_file,project_name):
 						if AD[0] == '.':
 							if int(AD[1]) > 5:
 								seqs[n - 9][1] += lineList[4].split(',')[0]
-								sitesUsed.append(line.strip('\n').split('\t')[0] + ' ' + line.strip('\n').split('\t')[1])
 							else:
 								seqs[n - 9][1] += "N"
-								sitesUsed.append(line.strip('\n').split('\t')[0] + ' ' + line.strip('\n').split('\t')[1])
 						#this checks if alt is blank
 						elif AD[1] == '.':
 							if int(AD[0]) > 5:
 								seqs[n - 9][1] += lineList[3]
-								sitesUsed.append(line.strip('\n').split('\t')[0] + ' ' + line.strip('\n').split('\t')[1])
 							else:
 								seqs[n - 9][1] += "N"
-								sitesUsed.append(line.strip('\n').split('\t')[0] + ' ' + line.strip('\n').split('\t')[1])
 						#checks if ref is greater then alt
 						elif int(AD[0]) > int(AD[1]):
 							if int(AD[0]) > (int(AD[1]) * 20):
 								seqs[n - 9][1] += lineList[3]
-								sitesUsed.append(line.strip('\n').split('\t')[0] + ' ' + line.strip('\n').split('\t')[1])
 							else:
 								seqs[n - 9][1] += "N"
-								sitesUsed.append(line.strip('\n').split('\t')[0] + ' ' + line.strip('\n').split('\t')[1])
 						#checks if alt is greater than ref
 						elif int(AD[1]) > int(AD[0]):
 							if int(AD[1]) > (int(AD[0]) * 20):
 								seqs[n - 9][1] += lineList[4].split(',')[0]
-								sitesUsed.append(line.strip('\n').split('\t')[0] + ' ' + line.strip('\n').split('\t')[1])
 							else:
 								seqs[n - 9][1] += "N"
-								sitesUsed.append(line.strip('\n').split('\t')[0] + ' ' + line.strip('\n').split('\t')[1])
 						elif int(AD[1]) == int(AD[0]):
 							seqs[n - 9][1] += lineList[3]
-							sitesUsed.append(line.strip('\n').split('\t')[0] + ' ' + line.strip('\n').split('\t')[1])
 						else:
 							raise RuntimeError(f"Something went wrong with {seqs[n][0]}\n{lineList[n]} at site {line.strip().split()[0]} {line.strip().split()[1]}")
 					else:
@@ -378,8 +403,8 @@ def metaDataBuilder(metadata_file):
 			metaData[ID] = [species, host, lineage, country]
 		return metaData
 
-
-def main(project, metadata_file, complete=False):
+#sites will be set to null if not given
+def main(project, metadata_file, reference, sites,complete=False):
 	outPut_Folder = os.path.join('Projects',project,"output")
 	metadata_file_name = os.path.join('Projects',project,"metadata",metadata_file)
 	input_folder = os.path.join('Projects',project,"newFastq")
@@ -408,6 +433,19 @@ def main(project, metadata_file, complete=False):
 	os.makedirs(os.path.join(outPut_Folder,'coverage_out'),exist_ok=True)
 	os.makedirs(os.path.join(outPut_Folder, 'merge_out'),exist_ok=True)
 
+	#builds reference for fasta
+	ref_file_path = Path(reference)
+	ref_name = ref_file_path.name.split('.')[0]
+
+	if os.path.isfile(os.path.join('Projects',project,'index',f'{ref_name}_index.1.bt2')):
+		index=os.path.join('Projects',project,'index',f'{ref_name}_index')
+	else:	
+		index = auto_build_ref(os.path.join('Projects',project),reference)
+	
+	print("Reference index built")
+	if sites == "":
+		sites = None
+
 	alignment_summary_file = f'{outPut_Folder}/alignment_summary.csv'
 	if os.path.exists(alignment_summary_file):
 		os.remove(alignment_summary_file)
@@ -419,7 +457,7 @@ def main(project, metadata_file, complete=False):
 		fileNum = file_path.name.split('.')[0]
 		file_name_list.append(fileNum)
 		if not os.path.isfile(os.path.join(outPut_Folder,'bowtie_out',f'{fileNum}hits.bam')):
-			auto_bowtie2(outPut_Folder, file,fileNum, threads)
+			auto_bowtie2(outPut_Folder, file,fileNum, threads,index)
 
 		summary_string = parse_alignment_summary(f'{outPut_Folder}/bowtie_out/{fileNum}_alignment_summary.txt', outPut_Folder)
 		with open(alignment_summary_file, "a") as out_file:
@@ -437,7 +475,7 @@ def main(project, metadata_file, complete=False):
 				raise RuntimeError(error_details)
 
 		if not os.path.isfile(os.path.join(outPut_Folder,'mpileup_out',f'{fileNum}.vcf')):
-			auto_mpileup(outPut_Folder, fileNum, threads)
+			auto_mpileup(outPut_Folder, project,fileNum, threads,reference)
 		
 		if not os.path.isfile(os.path.join(outPut_Folder,'call_out',f'{fileNum}call.vcf')):
 			auto_call(outPut_Folder, fileNum)
@@ -456,7 +494,7 @@ def main(project, metadata_file, complete=False):
 		autoMerge(outPut_Folder,project)
 
 	if not os.path.isdir(os.path.join(outPut_Folder,'built_fasta')):
-		sampleBuilder(outPut_Folder,metadata_file_name,project)
+		sampleBuilder(outPut_Folder,metadata_file_name,project,sites)
 	
 	return file_name_list
 

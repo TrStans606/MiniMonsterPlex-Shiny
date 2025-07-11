@@ -69,7 +69,9 @@ ui <- dashboardPage(
                     choices = NULL, selected = "",
                     options = list(create = TRUE, placeholder = "Enter Project ID")
                   ),
-                  textInput("metadata.file", "Metadata filename", value = "metadata.csv")
+                  textInput("metadata.file", "Metadata filename", value = "metadata.csv"),
+                  textInput("reference.file", "Reference fasta", value = ""),
+                  textInput("sites.file", "Sites list", value = "")
                 )
               ),
               fluidRow(
@@ -161,13 +163,15 @@ server <- function(input, output, session) {
                          server = TRUE)
   })
   
-  # Dynamically render fileInputs only when project_id is non-empty
+  # Dynamically render fileInputs only when project_id and ref is non-empty
   output$file_upload_ui <- renderUI({
-    req(nzchar(input$project_id))
+    req(nzchar(input$project_id),nzchar(input$reference.file))
     tagList(
       fileInput("fastq_files",     "Upload FASTQ files:", multiple = TRUE,
                 accept = c(".gz", ".fastq", ".fq")),
-      fileInput("metadata_upload", "Upload metadata file", accept = ".csv")
+      fileInput("metadata_upload", "Upload metadata file", accept = ".csv"),
+      fileInput("reference_upload", "Upload reference file", accept = ".fasta"),
+      fileInput("sites_upload", "Upload sites file", accept = ".txt")
     )
   })
   
@@ -199,6 +203,32 @@ server <- function(input, output, session) {
     message("Metadata copied to: ", file.path(meta_dir, input$metadata_upload$name))
   })
   
+  #copy reference file
+  observe({
+    req(nzchar(input$project_id), input$reference_upload)
+    ref_dir <- file.path(projects_dir, input$project_id, "index")
+    dir.create(ref_dir, recursive = TRUE, showWarnings = FALSE)
+    file.copy(
+      input$reference_upload$datapath,
+      file.path(ref_dir, input$reference_upload$name),
+      overwrite = TRUE
+    )
+    message("Reference copied to: ", file.path(ref_dir, input$reference_upload$name))
+  })
+  
+  #copy sites file
+  observe({
+    req(nzchar(input$project_id), input$sites_upload)
+    sites_dir <- file.path(projects_dir, input$project_id)
+    dir.create(sites_dir, recursive = TRUE, showWarnings = FALSE)
+    file.copy(
+      input$sites_upload$datapath,
+      file.path(sites_dir, input$sites_upload$name),
+      overwrite = TRUE
+    )
+    message("Sites copied to: ", file.path(sites_dir, input$sites_upload$name))
+  })
+  
   # Run analysis
   observeEvent(input$myButton, {
     withProgress( 
@@ -207,7 +237,7 @@ server <- function(input, output, session) {
       min = 0,
       max = 10,
       {
-        req(nzchar(input$project_id), input$metadata.file)
+        req(nzchar(input$project_id), input$metadata.file,input$reference_upload)
         
         project_id <<- input$project_id
         
@@ -218,7 +248,7 @@ server <- function(input, output, session) {
         
         tryCatch({
           # Call the main python function
-          file_name_list <- main(project_id, input$metadata.file)
+          file_name_list <- main(project_id, input$metadata.file,input$reference.file,input$sites.file)
           
           setProgress(4, message = 'Analysis complete. Displaying filter selection.')
           
