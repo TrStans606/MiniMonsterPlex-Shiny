@@ -7,6 +7,7 @@ dependencies:
   - bcftools=1.21=h48e1df0_1
   - bedtools=2.31.1=he85ad4a_3
   - bioconductor-ggtree=3.14.0=r44hdfd78af_0
+  - bioconductor-ggtreeextra=1.16.0=r44hdfd78af_0
   - bioconductor-treeio=1.30.0=r44hdfd78af_0
   - bowtie2=2.5.4=hdd4e3a4_5
   - bwidget=1.10.1=hce30654_0
@@ -136,6 +137,7 @@ dependencies:
   - r-gargle=1.5.2=r44h785f33e_1
   - r-generics=0.1.4=r44hc72bb7e_0
   - r-ggfun=0.1.8=r44hc72bb7e_0
+  - r-ggnewscale=0.5.2=r44hc72bb7e_0
   - r-ggplot2=3.5.2=r44hc72bb7e_0
   - r-ggplotify=0.1.2=r44hc72bb7e_1
   - r-ggrepel=0.9.6=r44hdd833ad_0
