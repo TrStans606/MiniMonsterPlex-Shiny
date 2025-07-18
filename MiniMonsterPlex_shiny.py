@@ -295,7 +295,7 @@ def sampleBuilder(outPut,metadata_file,project_name,sites_list):
 	if sites_list != None:
 		sites =[]
 		full = False
-		with open(os.path.join(project_name,sites_list), 'r') as read:
+		with open(sites_list, 'r') as read:
 			for line in read:
 				sites.append(line.strip('\n'))
 	else:
@@ -383,13 +383,10 @@ def sampleBuilder(outPut,metadata_file,project_name,sites_list):
 					seqID = f'{"-".join(seqID.split("_"))}'
 				if (seqID) in sample_metadata:
 					seqSpecies = sample_metadata[seqID][0]
-					seqHost = sample_metadata[seqID][1]
-					seqLineage = sample_metadata[seqID][2]
-					seqCountry = sample_metadata[seqID][3]
-					writeSeq.write(f'>{seqID}_{seqSpecies}_{seqHost}_{seqLineage}_{seqCountry}\n{read[1]}\n')
+					writeSeq.write(f'>{seqID}_{seqSpecies}\n{read[1]}\n')
 				else:
 					writeSeq.write('>' + seqID
-								+ '_._._._.' + '\n' + read[1] + '\n')
+								+ '_.' + '\n' + read[1] + '\n')
 						
 def metaDataBuilder(metadata_file):
 	metaData = {}
@@ -397,10 +394,7 @@ def metaDataBuilder(metadata_file):
 		for line in read:
 			ID = line.split(',')[0].strip('\n')
 			species = line.split(',')[1].strip('\n')
-			host = line.split(',')[2].strip('\n')
-			lineage = line.split(',')[3].strip('\n')
-			country = line.split(',')[4].strip('\n')
-			metaData[ID] = [species, host, lineage, country]
+			metaData[ID] = [species]
 		return metaData
 
 #sites will be set to null if not given
@@ -408,6 +402,7 @@ def main(project, metadata_file, reference, sites,complete=False):
 	outPut_Folder = os.path.join('Projects',project,"output")
 	metadata_file_name = os.path.join('Projects',project,"metadata",metadata_file)
 	input_folder = os.path.join('Projects',project,"newFastq")
+	sites_folder= os.path.join('Projects',project,sites)
 	threads = multiprocessing.cpu_count()
 	if threads > 8:
 		threads = 8
@@ -421,6 +416,8 @@ def main(project, metadata_file, reference, sites,complete=False):
 	print(f"{'Metadata File':<20} {metadata_file_name}")
 	print(f"{'Output Folder':<20} {outPut_Folder}")
 	print(f"{'Input Folder':<20} {input_folder}")
+	print(f"{'Reference':<20} {reference}")
+	print(f"{'Sites Folder':<20} {sites_folder}")
 	print(f"{'Complete mode':<20} {complete}")
 
 	os.makedirs(outPut_Folder,exist_ok=True)
@@ -494,7 +491,7 @@ def main(project, metadata_file, reference, sites,complete=False):
 		autoMerge(outPut_Folder,project)
 
 	if not os.path.isdir(os.path.join(outPut_Folder,'built_fasta')):
-		sampleBuilder(outPut_Folder,metadata_file_name,project,sites)
+		sampleBuilder(outPut_Folder,metadata_file_name,project,sites_folder)
 	
 	return file_name_list
 
